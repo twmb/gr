@@ -22,7 +22,7 @@ func die(why string, args ...interface{}) {
 }
 
 func usage() {
-	fmt.Printf(`usage: gpr (-s) [stack dump]
+	fmt.Printf(`usage: gr (-s) [stack dump]
 
 `)
 	os.Exit(0)
