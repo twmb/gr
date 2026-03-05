@@ -300,10 +300,43 @@ func Parse(r io.Reader, opts ...ParseOpt) (*Dump, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1<<20), 1<<20)
 
+	// Auto-detect a common prefix on lines (e.g. CI log prefixes
+	// like "job name\tSTEP\t2006-01-02T15:04:05.999Z content").
+	// We scan for the first "goroutine " header and use the byte
+	// offset as the prefix length to strip from all lines. The
+	// prefix content may vary per line (timestamps), so we strip
+	// by length, not by exact match.
+	prefixLen := 0
+	prefixDetected := false
+
+	stripPrefix := func(line []byte) []byte {
+		if prefixLen > 0 && len(line) >= prefixLen {
+			line = line[prefixLen:]
+		}
+		// CI blank lines are prefix + whitespace; trim to empty.
+		if len(line) > 0 && len(bytes.TrimSpace(line)) == 0 {
+			return line[:0]
+		}
+		return line
+	}
+
 	gs := make([]*goroutine, 0, 10000)
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if g := p.parse(line); g != nil {
+
+		if !prefixDetected {
+			if idx := bytes.Index(line, goroPfx); idx > 0 {
+				prefixLen = idx
+				prefixDetected = true
+			} else if idx == 0 {
+				prefixDetected = true
+			} else {
+				// Skip lines before the first goroutine header.
+				continue
+			}
+		}
+
+		if g := p.parse(stripPrefix(line)); g != nil {
 			gs = append(gs, g)
 		}
 	}

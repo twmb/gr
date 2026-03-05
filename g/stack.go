@@ -65,9 +65,12 @@ func (g *goroutine) CreatedByName() string { return g.createdBy.name }
 
 func (g *goroutine) HasFunc(pattern string) bool {
 	for _, f := range g.stack {
-		if strings.Contains(f.call.name, pattern) {
+		if strings.Contains(f.call.name, pattern) || strings.Contains(f.call.file, pattern) {
 			return true
 		}
+	}
+	if strings.Contains(g.createdBy.name, pattern) || strings.Contains(g.createdBy.file, pattern) {
+		return true
 	}
 	return false
 }
@@ -180,6 +183,27 @@ func (d *Dump) Coalesce() *Grouped {
 
 	for _, g := range d.gs {
 		key := fmt.Sprintf("%v", g.ends())
+		dups[key] = append(dups[key], g)
+	}
+
+	groups := make([][]*goroutine, 0, len(dups))
+	for _, gs := range dups {
+		groups = append(groups, gs)
+	}
+
+	sortGroups(groups)
+	return &Grouped{groups: groups}
+}
+
+// CoalesceByApp groups goroutines by first non-runtime frame + created-by,
+// rather than top (blocking) frame + created-by. This clusters goroutines
+// by "what app code they're in" rather than "what syscall they're stuck in".
+func (d *Dump) CoalesceByApp() *Grouped {
+	dups := make(map[string][]*goroutine, 100)
+
+	for _, g := range d.gs {
+		f := firstAppFrame(g)
+		key := fmt.Sprintf("%s\x00%s", f.call.name, g.createdBy.name)
 		dups[key] = append(dups[key], g)
 	}
 
@@ -398,6 +422,25 @@ func (g *Grouped) WriteShort(w io.Writer, opt WriteOpt) {
 		f.writeTo(w)
 		if repr.createdBy.name != "" {
 			fmt.Fprintf(w, "created by %s\n\t%s:%d\n", repr.createdBy.name, repr.createdBy.file, repr.createdBy.line)
+		}
+	}
+}
+
+// WriteList writes a compact one-line-per-group view of all groups:
+// count, first app frame, and created-by.
+func (g *Grouped) WriteList(w io.Writer) {
+	if !g.ok() {
+		fmt.Fprintf(w, "no groups remaining\n")
+		return
+	}
+	for _, group := range g.groups {
+		repr := group[0]
+		f := firstAppFrame(repr)
+		name := frameDisplayName(f)
+		if repr.createdBy.name != "" {
+			fmt.Fprintf(w, "  %d\t%s <- %s\n", len(group), name, repr.createdBy.name)
+		} else {
+			fmt.Fprintf(w, "  %d\t%s\n", len(group), name)
 		}
 	}
 }
