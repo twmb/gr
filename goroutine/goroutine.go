@@ -1,4 +1,4 @@
-package g
+package goroutine
 
 import (
 	"bufio"
@@ -64,7 +64,7 @@ func parseInt(b []byte) (int, bool) {
 // Format from runtime/traceback.go:
 //
 //	goroutine <ID>[ gp=<ptr> m=<id> mp=<ptr>] [<status>[ (leaked)][ (scan)][ (durable)][, <N> minutes][, locked to thread][, synctest bubble <N>][ labels:{...}]]:
-func parseNewG(in []byte) (g *goroutine, ok bool) {
+func parseNewG(in []byte) (g *Goroutine, ok bool) {
 	if !bytes.HasPrefix(in, goroPfx) {
 		return nil, false
 	}
@@ -95,7 +95,7 @@ func parseNewG(in []byte) (g *goroutine, ok bool) {
 	}
 	inner := in[1 : l-2] // content between [ and ]
 
-	g = &goroutine{
+	g = &Goroutine{
 		id:             id,
 		parentGoid:     -1,
 		synctestBubble: -1,
@@ -269,7 +269,7 @@ func parseFile(in []byte) (file []byte, line int, ok bool) {
 }
 
 type parser struct {
-	g    *goroutine
+	g    *Goroutine
 	next func(*parser, []byte)
 
 	seenGoroutine    bool // true once we've parsed at least one goroutine
@@ -320,7 +320,7 @@ func Parse(r io.Reader, opts ...ParseOpt) (*Dump, error) {
 		return line
 	}
 
-	gs := make([]*goroutine, 0, 10000)
+	gs := make([]*Goroutine, 0, 10000)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 
@@ -354,7 +354,7 @@ func Parse(r io.Reader, opts ...ParseOpt) (*Dump, error) {
 	return &Dump{gs: gs}, nil
 }
 
-func (p *parser) flush() *goroutine {
+func (p *parser) flush() *Goroutine {
 	if p.g == nil {
 		return nil
 	}
@@ -371,7 +371,7 @@ func (p *parser) flush() *goroutine {
 	return g
 }
 
-func (p *parser) parse(line []byte) *goroutine {
+func (p *parser) parse(line []byte) *Goroutine {
 	// Handle crash separator.
 	if bytes.Equal(line, crashSeparator) {
 		return p.flush()

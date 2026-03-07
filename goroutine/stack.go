@@ -1,4 +1,4 @@
-package g
+package goroutine
 
 import (
 	"fmt"
@@ -21,7 +21,7 @@ type frame struct {
 	cgo         bool // true for "non-Go function" frames
 }
 
-type goroutine struct {
+type Goroutine struct {
 	id      int
 	status  string
 	minutes int
@@ -54,16 +54,13 @@ type label struct {
 	key, value string
 }
 
-// Goroutine is the exported handle to a parsed goroutine.
-type Goroutine = goroutine
+func (g *Goroutine) ID() int              { return g.id }
+func (g *Goroutine) Status() string        { return g.status }
+func (g *Goroutine) Minutes() int          { return g.minutes }
+func (g *Goroutine) Locked() bool          { return g.locked }
+func (g *Goroutine) CreatedByName() string { return g.createdBy.name }
 
-func (g *goroutine) ID() int              { return g.id }
-func (g *goroutine) Status() string        { return g.status }
-func (g *goroutine) Minutes() int          { return g.minutes }
-func (g *goroutine) Locked() bool          { return g.locked }
-func (g *goroutine) CreatedByName() string { return g.createdBy.name }
-
-func (g *goroutine) HasFunc(pattern string) bool {
+func (g *Goroutine) HasFunc(pattern string) bool {
 	for _, f := range g.stack {
 		if strings.Contains(f.call.name, pattern) || strings.Contains(f.call.file, pattern) {
 			return true
@@ -79,7 +76,7 @@ func (g *goroutine) HasFunc(pattern string) bool {
 // runtime/stdlib/testing infrastructure. A goroutine is runtime if every
 // frame is an infrastructure frame (by function prefix or _test.go file)
 // and the created-by (if any) also matches.
-func (g *goroutine) IsRuntime() bool {
+func (g *Goroutine) IsRuntime() bool {
 	for _, f := range g.stack {
 		if f.cgo || f.unavailable {
 			continue
@@ -127,7 +124,7 @@ func isInfraCall(c call) bool {
 
 // firstAppFrame returns the first non-runtime frame in a goroutine's stack,
 // or the top frame if all frames are runtime.
-func firstAppFrame(g *goroutine) *frame {
+func firstAppFrame(g *Goroutine) *frame {
 	for i := range g.stack {
 		f := &g.stack[i]
 		if f.cgo || f.unavailable {
@@ -150,11 +147,11 @@ func frameDisplayName(f *frame) string {
 	return f.call.name
 }
 
-func (g *goroutine) base() *frame {
+func (g *Goroutine) base() *frame {
 	return &g.stack[0]
 }
 
-func (g *goroutine) ends() ends {
+func (g *Goroutine) ends() ends {
 	return ends{g.base().call, g.createdBy}
 }
 
@@ -163,30 +160,30 @@ type ends struct {
 }
 
 type Grouped struct {
-	groups [][]*goroutine
+	groups [][]*Goroutine
 }
 
 type Dump struct {
-	gs []*goroutine
+	gs []*Goroutine
 }
 
-func NewDump(gs []*goroutine) *Dump {
+func NewDump(gs []*Goroutine) *Dump {
 	return &Dump{gs: gs}
 }
 
-func (d *Dump) Goroutines() []*goroutine {
+func (d *Dump) Goroutines() []*Goroutine {
 	return d.gs
 }
 
 func (d *Dump) Coalesce() *Grouped {
-	dups := make(map[string][]*goroutine, 100)
+	dups := make(map[string][]*Goroutine, 100)
 
 	for _, g := range d.gs {
 		key := fmt.Sprintf("%v", g.ends())
 		dups[key] = append(dups[key], g)
 	}
 
-	groups := make([][]*goroutine, 0, len(dups))
+	groups := make([][]*Goroutine, 0, len(dups))
 	for _, gs := range dups {
 		groups = append(groups, gs)
 	}
@@ -199,7 +196,7 @@ func (d *Dump) Coalesce() *Grouped {
 // rather than top (blocking) frame + created-by. This clusters goroutines
 // by "what app code they're in" rather than "what syscall they're stuck in".
 func (d *Dump) CoalesceByApp() *Grouped {
-	dups := make(map[string][]*goroutine, 100)
+	dups := make(map[string][]*Goroutine, 100)
 
 	for _, g := range d.gs {
 		f := firstAppFrame(g)
@@ -207,7 +204,7 @@ func (d *Dump) CoalesceByApp() *Grouped {
 		dups[key] = append(dups[key], g)
 	}
 
-	groups := make([][]*goroutine, 0, len(dups))
+	groups := make([][]*Goroutine, 0, len(dups))
 	for _, gs := range dups {
 		groups = append(groups, gs)
 	}
@@ -216,7 +213,7 @@ func (d *Dump) CoalesceByApp() *Grouped {
 	return &Grouped{groups: groups}
 }
 
-func sortGroups(groups [][]*goroutine) {
+func sortGroups(groups [][]*Goroutine) {
 	sort.Slice(groups, func(i, j int) bool {
 		if len(groups[i]) != len(groups[j]) {
 			return len(groups[i]) > len(groups[j])
@@ -233,7 +230,7 @@ func (g *Grouped) Top(n int) *Grouped {
 }
 
 func (g *Grouped) FilterMinGroupSize(n int) *Grouped {
-	var filtered [][]*goroutine
+	var filtered [][]*Goroutine
 	for _, group := range g.groups {
 		if len(group) >= n {
 			filtered = append(filtered, group)
@@ -279,7 +276,7 @@ func (f *frame) writeTo(w io.Writer) {
 	}
 }
 
-func writeGroupHeader(w io.Writer, group []*goroutine, showIDs bool) {
+func writeGroupHeader(w io.Writer, group []*Goroutine, showIDs bool) {
 	minmin := 1 << 62
 	maxmin := 0
 	for _, g := range group {
@@ -325,7 +322,7 @@ func writeGroupHeader(w io.Writer, group []*goroutine, showIDs bool) {
 	fmt.Fprintln(w)
 }
 
-func writeGoroutineStack(w io.Writer, g *goroutine) {
+func writeGoroutineStack(w io.Writer, g *Goroutine) {
 	for _, f := range g.stack {
 		f.writeTo(w)
 	}
@@ -344,11 +341,11 @@ func writeGoroutineStack(w io.Writer, g *goroutine) {
 // pickExamples selects N representative goroutines from a group: first by ID,
 // last by ID, then evenly spaced from the middle. The group is sorted by ID
 // before selection so "first" and "last" correspond to oldest and newest.
-func pickExamples(group []*goroutine, n int) []*goroutine {
+func pickExamples(group []*Goroutine, n int) []*Goroutine {
 	if n >= len(group) {
 		return group
 	}
-	sorted := make([]*goroutine, len(group))
+	sorted := make([]*Goroutine, len(group))
 	copy(sorted, group)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].id < sorted[j].id
@@ -357,7 +354,7 @@ func pickExamples(group []*goroutine, n int) []*goroutine {
 		return sorted[:1]
 	}
 	// First and last, then fill from middle.
-	picked := make([]*goroutine, 0, n)
+	picked := make([]*Goroutine, 0, n)
 	picked = append(picked, sorted[0])
 	picked = append(picked, sorted[len(sorted)-1])
 	for len(picked) < n {
@@ -454,7 +451,7 @@ func WriteTriage(w io.Writer, grouped *Grouped) {
 
 	total := 0
 	statusCounts := make(map[string]int)
-	var longestWaiter *goroutine
+	var longestWaiter *Goroutine
 	for _, group := range grouped.groups {
 		for _, g := range group {
 			total++
