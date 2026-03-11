@@ -25,6 +25,7 @@ func goroutinesCmd(args []string) {
 		short    = flags.Bool("short", false, "compact: show only first app frame + created-by per group")
 		list     = flags.Bool("list", false, "one line per group: count + first app frame + created-by")
 		summary  = flags.Bool("summary", false, "stats only: status counts, top groups, longest waiters")
+		terse    = flags.Bool("terse", false, "single-line-per-frame output with short paths (for LLM/piping)")
 		showIDs  = flags.Bool("show-ids", false, "show goroutine IDs in group headers")
 		perGroup = flags.Int("examples", 0, "show N example goroutines per group with full stacks")
 
@@ -55,6 +56,7 @@ Output:
   -short               compact: show only first app frame + created-by per group
   -list                one line per group: count + first app frame + created-by
   -summary             stats only: status counts, top groups, longest waiters
+  -terse               single-line-per-frame, short paths (for LLM/piping)
   -show-ids            show goroutine IDs in group headers
   -examples <N>        show N example goroutines per group with full stacks
 
@@ -215,6 +217,7 @@ Examples:
 	opt := goroutine.WriteOpt{
 		ShowIDs:  *showIDs,
 		PerGroup: *perGroup,
+		Terse:    *terse,
 	}
 
 	// Output.

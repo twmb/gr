@@ -74,6 +74,7 @@ like `/pkg/mypackage/server.go`, or a created-by like `mypackage.NewServer`.
 | `-short` | Compact: first application frame + created-by per group |
 | `-list` | One line per group: count + first application frame + created-by |
 | `-summary` | Stats only: status counts, top 5 groups, longest waiters |
+| `-terse` | Single-line-per-frame output with short paths (for LLM/piping) |
 | `-show-ids` | Add goroutine IDs to group headers (for log correlation) |
 | `-examples <N>` | Show N goroutines per group (picks first and last by ID) |
 
@@ -132,9 +133,18 @@ gr g -show-ids -func mypackage dump.txt
 # Compare first and last goroutine in each group
 gr g -examples 2 dump.txt
 
+# Terse output for LLM consumption (~60% fewer tokens)
+gr g -terse dump.txt
+
 # Pipe from a running process
 curl http://localhost:6060/debug/pprof/goroutine?debug=2 | gr g -no-runtime -short
 ```
+
+`-terse` combines each frame onto a single line with basename-only file paths,
+uses `<-` instead of `created by`, and removes blank lines between groups. This
+reduces token count by ~60% compared to default output while preserving all
+diagnostic information (function names, file names, line numbers). Combines with
+`-short`, `-no-runtime`, and other flags.
 
 ### What `-no-runtime` filters
 

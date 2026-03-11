@@ -259,6 +259,14 @@ func (g *Grouped) WriteSummary(w io.Writer) {
 type WriteOpt struct {
 	ShowIDs  bool // show goroutine IDs in group headers
 	PerGroup int  // show N example goroutines per group (0 = default single representative)
+	Terse    bool // compact single-line-per-frame output for LLM consumption
+}
+
+func baseName(path string) string {
+	if i := strings.LastIndexByte(path, '/'); i >= 0 {
+		return path[i+1:]
+	}
+	return path
 }
 
 func (f *frame) writeTo(w io.Writer) {
@@ -273,6 +281,22 @@ func (f *frame) writeTo(w io.Writer) {
 		fmt.Fprintf(w, "%s\n\t<unavailable>\n", f.call.name)
 	} else {
 		fmt.Fprintf(w, "%s\n\t%s:%d\n", f.call.name, f.call.file, f.call.line)
+	}
+}
+
+func (f *frame) writeTerseTo(w io.Writer) {
+	if f.cgo {
+		if f.call.file != "" {
+			fmt.Fprintf(w, "non-Go function %s:%d\n", baseName(f.call.file), f.call.line)
+		} else {
+			fmt.Fprintln(w, "non-Go function")
+		}
+		return
+	}
+	if f.unavailable {
+		fmt.Fprintf(w, "%s <unavailable>\n", f.call.name)
+	} else {
+		fmt.Fprintf(w, "%s %s:%d\n", f.call.name, baseName(f.call.file), f.call.line)
 	}
 }
 
@@ -322,6 +346,52 @@ func writeGroupHeader(w io.Writer, group []*Goroutine, showIDs bool) {
 	fmt.Fprintln(w)
 }
 
+func writeGroupHeaderTerse(w io.Writer, group []*Goroutine, showIDs bool) {
+	minmin := 1 << 62
+	maxmin := 0
+	for _, g := range group {
+		if g.minutes > maxmin {
+			maxmin = g.minutes
+		}
+		if g.minutes < minmin {
+			minmin = g.minutes
+		}
+	}
+
+	repr := group[0]
+	fmt.Fprintf(w, "--- %d [%s]", len(group), repr.status)
+	if minmin == maxmin {
+		if minmin > 0 {
+			fmt.Fprintf(w, " %dmin", minmin)
+		}
+	} else {
+		fmt.Fprintf(w, " %d-%dmin", minmin, maxmin)
+	}
+	if showIDs {
+		ids := make([]int, len(group))
+		for i, g := range group {
+			ids[i] = g.id
+		}
+		sort.Ints(ids)
+		fmt.Fprint(w, " [")
+		max := 10
+		if len(ids) < max {
+			max = len(ids)
+		}
+		for i := 0; i < max; i++ {
+			if i > 0 {
+				fmt.Fprint(w, ",")
+			}
+			fmt.Fprintf(w, "%d", ids[i])
+		}
+		if len(ids) > max {
+			fmt.Fprintf(w, ",+%d", len(ids)-max)
+		}
+		fmt.Fprint(w, "]")
+	}
+	fmt.Fprintln(w)
+}
+
 func writeGoroutineStack(w io.Writer, g *Goroutine) {
 	for _, f := range g.stack {
 		f.writeTo(w)
@@ -335,6 +405,22 @@ func writeGoroutineStack(w io.Writer, g *Goroutine) {
 	}
 	if g.createdBy.name != "" {
 		fmt.Fprintf(w, "created by %s\n\t%s:%d\n", g.createdBy.name, g.createdBy.file, g.createdBy.line)
+	}
+}
+
+func writeGoroutineStackTerse(w io.Writer, g *Goroutine) {
+	for _, f := range g.stack {
+		f.writeTerseTo(w)
+	}
+	if g.framesElided {
+		if g.elidedCount > 0 {
+			fmt.Fprintf(w, "...%d elided...\n", g.elidedCount)
+		} else {
+			fmt.Fprintln(w, "...elided...")
+		}
+	}
+	if g.createdBy.name != "" {
+		fmt.Fprintf(w, "<- %s %s:%d\n", g.createdBy.name, baseName(g.createdBy.file), g.createdBy.line)
 	}
 }
 
@@ -378,24 +464,31 @@ func (g *Grouped) Write(w io.Writer, opt WriteOpt) {
 		return
 	}
 
+	writeHeader := writeGroupHeader
+	writeStack := writeGoroutineStack
+	if opt.Terse {
+		writeHeader = writeGroupHeaderTerse
+		writeStack = writeGoroutineStackTerse
+	}
+
 	for i, group := range g.groups {
-		if i > 0 {
+		if i > 0 && !opt.Terse {
 			fmt.Fprintln(w)
 		}
-		writeGroupHeader(w, group, opt.ShowIDs)
+		writeHeader(w, group, opt.ShowIDs)
 
 		if opt.PerGroup <= 0 {
-			writeGoroutineStack(w, group[0])
+			writeStack(w, group[0])
 			continue
 		}
 
 		examples := pickExamples(group, opt.PerGroup)
 		for j, gr := range examples {
-			if j > 0 {
+			if j > 0 && !opt.Terse {
 				fmt.Fprintln(w)
 			}
 			fmt.Fprintf(w, "  goroutine %d:\n", gr.id)
-			writeGoroutineStack(w, gr)
+			writeStack(w, gr)
 		}
 	}
 }
@@ -409,16 +502,24 @@ func (g *Grouped) WriteShort(w io.Writer, opt WriteOpt) {
 	}
 
 	for i, group := range g.groups {
-		if i > 0 {
+		if i > 0 && !opt.Terse {
 			fmt.Fprintln(w)
 		}
-		writeGroupHeader(w, group, opt.ShowIDs)
 
 		repr := group[0]
 		f := firstAppFrame(repr)
-		f.writeTo(w)
-		if repr.createdBy.name != "" {
-			fmt.Fprintf(w, "created by %s\n\t%s:%d\n", repr.createdBy.name, repr.createdBy.file, repr.createdBy.line)
+		if opt.Terse {
+			writeGroupHeaderTerse(w, group, opt.ShowIDs)
+			f.writeTerseTo(w)
+			if repr.createdBy.name != "" {
+				fmt.Fprintf(w, "<- %s %s:%d\n", repr.createdBy.name, baseName(repr.createdBy.file), repr.createdBy.line)
+			}
+		} else {
+			writeGroupHeader(w, group, opt.ShowIDs)
+			f.writeTo(w)
+			if repr.createdBy.name != "" {
+				fmt.Fprintf(w, "created by %s\n\t%s:%d\n", repr.createdBy.name, repr.createdBy.file, repr.createdBy.line)
+			}
 		}
 	}
 }
